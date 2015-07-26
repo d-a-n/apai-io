@@ -44,12 +44,30 @@ class ApaiIO
      */
     protected $configuration;
 
+    protected $apiTimeout = 0;
+
+    protected $apiTimeoutIncrement = 100000; //100 ms
+
     /**
      * @param ConfigurationInterface $configuration
      */
     public function __construct(ConfigurationInterface $configuration = null)
     {
         $this->configuration = $configuration;
+    }
+
+    public function incrementApiTimeout() {
+        $this->apiTimeout += $this->apiTimeoutIncrement;
+    }
+    public function decrementApiTimeout() {
+        $this->apiTimeout -= $this->apiTimeoutIncrement;
+        if ($this->apiTimeout < 0) {
+            $this->apiTimeout = 0;
+        }
+    }
+
+    public function getApiTimeout() {
+        return $this->apiTimeout;
     }
 
     /**
@@ -68,11 +86,34 @@ class ApaiIO
             throw new \Exception('No configuration passed.');
         }
 
+        performRequest:
+
         $requestObject = RequestFactory::createRequest($configuration);
 
-        $response = $requestObject->perform($operation);
+        usleep($this->getApiTimeout());
+
+        try {
+            $response = $requestObject->perform($operation);
+            $this->decrementApiTimeout();
+        } catch (\Exception $e) {
+
+            if ($e instanceof \SoapFault)
+            {
+                if ($e->faultcode === 'aws:Client.RequestThrottled') {
+                    $this->incrementApiTimeout();
+                    goto performRequest;
+                }
+            }
+
+            throw $e;
+        }
 
         return $this->applyResponseTransformer($response, $configuration);
+    }
+
+    private function handleRequestException(\Exception $e) {
+
+
     }
 
     /**
